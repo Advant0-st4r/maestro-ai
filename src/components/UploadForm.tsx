@@ -1,133 +1,144 @@
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
-import { Loader2, Upload } from "lucide-react";
-import { v4 as uuidv4 } from "uuid";
+'use client'
 
-type UploadFormData = {
-  file: FileList;
-  context: string;
-};
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useForm } from 'react-hook-form'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Loader2, Upload, FileAudio } from 'lucide-react'
+import { toast } from 'sonner'
+import { trackMeetingUpload } from '@/lib/posthog'
 
-export const UploadForm = () => {
-  const [isLoading, setIsLoading] = useState(false);
-  const navigate = useNavigate();
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    watch,
-  } = useForm<UploadFormData>();
+interface UploadFormData {
+  file: FileList
+  context: string
+}
 
-  const fileList = watch("file");
-  const selectedFile = fileList?.[0];
+export function UploadForm() {
+  const [isUploading, setIsUploading] = useState(false)
+  const [fileError, setFileError] = useState('')
+  const router = useRouter()
+  
+  const { register, handleSubmit, formState: { errors }, watch } = useForm<UploadFormData>()
+  const fileInput = watch('file')
+
+  const validateFile = (file: File) => {
+    const allowedTypes = ['audio/mpeg', 'audio/mp4', 'audio/wav', 'video/mp4']
+    const maxSize = 100 * 1024 * 1024 // 100MB
+
+    if (!allowedTypes.includes(file.type)) {
+      return 'Invalid file type. Please upload MP3, MP4, or WAV files only.'
+    }
+
+    if (file.size > maxSize) {
+      return 'File too large. Maximum size is 100MB.'
+    }
+
+    return null
+  }
 
   const onSubmit = async (data: UploadFormData) => {
-    const file = data.file[0];
-    
-    // Validate file size (100MB)
-    if (file.size > 100 * 1024 * 1024) {
-      toast.error("File size must be less than 100MB");
-      return;
+    if (!data.file || data.file.length === 0) {
+      setFileError('Please select a file')
+      return
     }
 
-    // Validate file type
-    const validTypes = ["audio/mpeg", "audio/mp4", "audio/wav", "video/mp4"];
-    if (!validTypes.includes(file.type)) {
-      toast.error("Please upload a valid audio file (MP3, MP4, WAV)");
-      return;
+    const file = data.file[0]
+    const error = validateFile(file)
+    
+    if (error) {
+      setFileError(error)
+      return
     }
 
-    setIsLoading(true);
-    
+    setIsUploading(true)
+    setFileError('')
+
     try {
-      // Stub API call - generate mock meeting ID
-      const meetingId = uuidv4();
-      
-      // Mock upload processing
-      console.log("Upload API called:", {
-        meetingId,
-        fileName: file.name,
-        fileSize: file.size,
-        context: data.context,
-      });
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('context', data.context || '')
 
-      // Simulate processing delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      })
 
-      toast.success("Meeting uploaded successfully!");
-      navigate(`/verify/${meetingId}`);
+      const result = await response.json()
+
+      if (result.success) {
+        // Track analytics
+        trackMeetingUpload(result.meetingId, file.size, 0) // Duration would come from processing
+        
+        toast.success('Meeting uploaded successfully!')
+        router.push(`/verify/${result.meetingId}`)
+      } else {
+        toast.error(result.error || 'Upload failed')
+      }
     } catch (error) {
-      console.error("Upload error:", error);
-      toast.error("Failed to upload meeting. Please try again.");
+      console.error('Upload error:', error)
+      toast.error('Failed to upload meeting')
     } finally {
-      setIsLoading(false);
+      setIsUploading(false)
     }
-  };
+  }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      {/* File Input */}
       <div className="space-y-2">
-        <Label htmlFor="audio-file" className="text-sm font-medium">
-          Audio File <span className="text-destructive">*</span>
-        </Label>
+        <Label htmlFor="file">Audio/Video File</Label>
         <div className="relative">
-          <input
-            id="audio-file"
+          <Input
+            id="file"
             type="file"
-            accept=".mp3,.mp4,.wav,audio/mpeg,audio/mp4,audio/wav,video/mp4"
-            {...register("file", { required: "Please select an audio file" })}
-            className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary-hover file:cursor-pointer file:transition-colors cursor-pointer"
-            aria-label="Upload audio file"
+            accept=".mp3,.mp4,.wav"
+            {...register('file', { required: 'File is required' })}
+            className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
           />
         </div>
-        {selectedFile && (
-          <p className="text-xs text-muted-foreground">
-            Selected: {selectedFile.name} ({(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)
-          </p>
+        {fileError && (
+          <p className="text-sm text-red-600">{fileError}</p>
         )}
         {errors.file && (
-          <p className="text-sm text-destructive" role="alert">
-            {errors.file.message}
-          </p>
+          <p className="text-sm text-red-600">{errors.file.message}</p>
         )}
+        <p className="text-sm text-gray-500">
+          Supported formats: MP3, MP4, WAV (max 100MB)
+        </p>
       </div>
 
+      {/* Context Notes */}
       <div className="space-y-2">
-        <Label htmlFor="context" className="text-sm font-medium">
-          Context Notes (Optional)
-        </Label>
+        <Label htmlFor="context">Context Notes (Optional)</Label>
         <Textarea
           id="context"
-          placeholder="E.g., Q4 focus, strategic planning meeting..."
-          {...register("context")}
-          className="min-h-[80px] resize-none"
-          aria-label="Context notes for the meeting"
+          placeholder="E.g., Q4 focus meeting, client discussion, team standup..."
+          {...register('context')}
+          className="min-h-[80px]"
         />
       </div>
 
+      {/* Submit Button */}
       <Button
         type="submit"
-        disabled={isLoading}
-        className="w-full"
-        aria-label="Process meeting"
+        disabled={isUploading}
+        className="w-full bg-blue-600 hover:bg-blue-700 text-white"
       >
-        {isLoading ? (
+        {isUploading ? (
           <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Processing...
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            Processing Meeting...
           </>
         ) : (
           <>
-            <Upload className="h-4 w-4" />
+            <Upload className="w-4 h-4 mr-2" />
             Process Meeting
           </>
         )}
       </Button>
     </form>
-  );
-};
+  )
+}

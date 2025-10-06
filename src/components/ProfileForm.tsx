@@ -1,117 +1,164 @@
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
-import { Loader2, FileJson } from "lucide-react";
+'use client'
 
-type ProfileFormData = {
-  profileFile: FileList;
-};
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Loader2, Upload, FileText } from 'lucide-react'
+import { toast } from 'sonner'
 
-export const ProfileForm = () => {
-  const [isLoading, setIsLoading] = useState(false);
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    watch,
-    reset,
-  } = useForm<ProfileFormData>();
+interface ProfileFormData {
+  file: FileList
+}
 
-  const fileList = watch("profileFile");
-  const selectedFile = fileList?.[0];
+export function ProfileForm() {
+  const [isUploading, setIsUploading] = useState(false)
+  const [fileError, setFileError] = useState('')
+  
+  const { register, handleSubmit, formState: { errors } } = useForm<ProfileFormData>()
+
+  const validateFile = (file: File) => {
+    if (file.type !== 'application/json') {
+      return 'Please upload a JSON file'
+    }
+
+    return null
+  }
+
+  const validateJSON = (content: string) => {
+    try {
+      const parsed = JSON.parse(content)
+      
+      // Check for required fields
+      if (!parsed.company || !parsed.team_roles) {
+        return 'JSON must contain "company" and "team_roles" fields'
+      }
+
+      return null
+    } catch (error) {
+      return 'Invalid JSON format'
+    }
+  }
 
   const onSubmit = async (data: ProfileFormData) => {
-    const file = data.profileFile[0];
-
-    // Validate file type
-    if (!file.name.endsWith(".json")) {
-      toast.error("Please upload a valid JSON file");
-      return;
+    if (!data.file || data.file.length === 0) {
+      setFileError('Please select a file')
+      return
     }
 
-    setIsLoading(true);
+    const file = data.file[0]
+    const error = validateFile(file)
+    
+    if (error) {
+      setFileError(error)
+      return
+    }
+
+    setIsUploading(true)
+    setFileError('')
 
     try {
-      // Read and validate JSON
-      const fileContent = await file.text();
-      const profileData = JSON.parse(fileContent);
-
-      // Mock API call
-      console.log("Profile API called:", {
-        profileData,
-        fileName: file.name,
-      });
-
-      // Store in localStorage for demo
-      localStorage.setItem("companyProfile", JSON.stringify(profileData));
-
-      // Simulate processing delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      toast.success("Company profile uploaded successfully!");
-      reset();
-    } catch (error) {
-      console.error("Profile upload error:", error);
-      if (error instanceof SyntaxError) {
-        toast.error("Invalid JSON format. Please check your file.");
-      } else {
-        toast.error("Failed to upload profile. Please try again.");
+      const content = await file.text()
+      const jsonError = validateJSON(content)
+      
+      if (jsonError) {
+        setFileError(jsonError)
+        setIsUploading(false)
+        return
       }
+
+      const profileData = JSON.parse(content)
+
+      const response = await fetch('/api/profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(profileData),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        // Store in localStorage for demo purposes
+        localStorage.setItem('company_profile', JSON.stringify(profileData))
+        toast.success('Profile uploaded! Personalization enabled.')
+      } else {
+        toast.error(result.error || 'Upload failed')
+      }
+    } catch (error) {
+      console.error('Profile upload error:', error)
+      toast.error('Failed to upload profile')
     } finally {
-      setIsLoading(false);
+      setIsUploading(false)
     }
-  };
+  }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="profile-file" className="text-sm font-medium">
-          Company Profile (JSON) <span className="text-destructive">*</span>
-        </Label>
-        <div className="text-xs text-muted-foreground mb-2">
-          Example format: {`{"audience": "B2B tech", "strategy": "Q4 growth", "roles": {"Alice": "Exec"}}`}
-        </div>
-        <input
-          id="profile-file"
-          type="file"
-          accept=".json,application/json"
-          {...register("profileFile", { required: "Please select a JSON file" })}
-          className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-secondary file:text-secondary-foreground hover:file:bg-secondary/80 file:cursor-pointer file:transition-colors cursor-pointer"
-          aria-label="Upload company profile JSON file"
-        />
-        {selectedFile && (
-          <p className="text-xs text-muted-foreground">
-            Selected: {selectedFile.name}
-          </p>
-        )}
-        {errors.profileFile && (
-          <p className="text-sm text-destructive" role="alert">
-            {errors.profileFile.message}
-          </p>
-        )}
+    <div className="space-y-4">
+      {/* Example JSON Structure */}
+      <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
+        <h3 className="text-sm font-medium text-gray-900 mb-2">Example JSON Structure:</h3>
+        <pre className="text-xs text-gray-600 whitespace-pre-wrap">
+{`{
+  "company": {
+    "name": "Acme Tech Solutions",
+    "size": "15 employees",
+    "industry": "B2B SaaS"
+  },
+  "team_roles": {
+    "Sarah Chen": {
+      "role": "CEO",
+      "focus": "Strategy, fundraising"
+    },
+    "Marcus Lee": {
+      "role": "Sales Lead", 
+      "focus": "Pipeline, demos"
+    }
+  }
+}`}
+        </pre>
       </div>
 
-      <Button
-        type="submit"
-        disabled={isLoading}
-        variant="secondary"
-        className="w-full"
-        aria-label="Upload profile"
-      >
-        {isLoading ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Uploading...
-          </>
-        ) : (
-          <>
-            <FileJson className="h-4 w-4" />
-            Upload Profile
-          </>
-        )}
-      </Button>
-    </form>
-  );
-};
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        {/* File Input */}
+        <div className="space-y-2">
+          <Label htmlFor="profile-file">Company Profile JSON</Label>
+          <Input
+            id="profile-file"
+            type="file"
+            accept=".json"
+            {...register('file', { required: 'File is required' })}
+            className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+          />
+          {fileError && (
+            <p className="text-sm text-red-600">{fileError}</p>
+          )}
+          {errors.file && (
+            <p className="text-sm text-red-600">{errors.file.message}</p>
+          )}
+        </div>
+
+        {/* Submit Button */}
+        <Button
+          type="submit"
+          disabled={isUploading}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+        >
+          {isUploading ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Uploading Profile...
+            </>
+          ) : (
+            <>
+              <Upload className="w-4 h-4 mr-2" />
+              Upload Profile
+            </>
+          )}
+        </Button>
+      </form>
+    </div>
+  )
+}
